@@ -1,6 +1,7 @@
 # R
 .RData
 .Rhistory
+sources.txt
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
