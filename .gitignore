@@ -2,6 +2,10 @@
 .RData
 .Rhistory
 sources.txt
+aggregate_data_dumps/
+aggregate_data_dumps/*
+viz/
+viz/*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
