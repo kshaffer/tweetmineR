@@ -25,9 +25,19 @@ The script will follow redirects from the ```https://t.co/``` URL shortener to f
 
 ## Instructions (Python & Tweepy)
 
-```twitter_stream.py``` is a Python script that uses Tweepy to fetch a live stream of tweets based on a search string. Register for a Twitter developer account, add your authentication details at the beginning of the script, and edit the following line to change your search query:
+```twitter_stream.py``` is a Python script that uses Tweepy to fetch a live stream of tweets based on a search string. Register for a Twitter developer account and add your authentication details at the beginning of the script. To start, either edit the following lines with your search query and output file name
 
-```myStream.filter(track=['Brexit'])```
+```else:
+    search_query = ['fox']
+    filename = 'fox_test.csv'```
+
+or call the script from the command line with the following format:
+
+```python twitter_stream.py "['fox']" fox.csv```
+
+(To stream all tweets containing the word 'fox' and output to file `fox_test.csv`.)
+
+Press CTRL-C to stop the script.
 
 More features and details coming soon...
 
