@@ -4,7 +4,7 @@ Mine and analyze tweets in R using TidyVerse tools and TAGS archiver for Google 
 
 See my blog post, ["Mining Twitter data with R, TidyText, and TAGS"](http://pushpullfork.com/2017/02/mining-twitter-data-tidy-text-tags/), for detailed instructions and examples.
 
-## Instructions
+## Instructions (TAGS)
 
 To use this script, first generate a [TAGS archive](https://tags.hawksey.info/) of the tweets you want to mine. Then publish a CSV version of the ```Archive``` page to the web or download it locally.
 
@@ -22,6 +22,12 @@ This script will tell you the following:
 - For archives generated from multiple sources, what are the most characteristic domains linked from those different archives?
 
 The script will follow redirects from the ```https://t.co/``` URL shortener to find the source URL and domain. Because this process takes a long time, it will only run on URLs that occur with a frequency above a threshold set at the beginning of the script (```minimum_occurrences```; default is 5).
+
+## Instructions (Python & Tweepy)
+
+```twitter_stream.py``` is a Python script that uses Tweepy to fetch a live stream of tweets based on a search string. Register for a Twitter developer account, add your authentication details at the beginning of the script, and edit the following line to change your search query:
+
+```myStream.filter(track=['Brexit'])```
 
 More features and details coming soon...
 
