@@ -49,4 +49,8 @@ Press CTRL-C to stop the script.
 
 More features and details coming soon...
 
+## To-do
+
+```mine_tweets.R``` is currently configured for TAGS. I plan on making a new version for Tweepy-downloaded tweets soon.
+
 Happy mining!
