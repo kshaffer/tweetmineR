@@ -41,6 +41,8 @@ or call the script from the command line with the following format:
 
 Press CTRL-C to stop the script.
 
+```twitter_search.py``` works similarly to ```twitter_stream.py```, except it searches backwards in time, as far as the Twitter API will allow. It functions the same way as ```twitter_stream.py```: add your Twitter developer credentials to the script, and then run from the command line with the same command as above. Used in conjunction with ```twitter_stream.py```, it should collect as many tweets as possible, going both backwards and forwards in time, given a particular search query. Following [this example](https://www.karambelkar.info/2015/01/how-to-use-twitters-search-rest-api-most-effectively./), it uses AppAuthHandler in order to increase the maximum tweets downloaded.
+
 More features and details coming soon...
 
 Happy mining!
