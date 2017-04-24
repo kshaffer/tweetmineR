@@ -2,6 +2,7 @@ import tweepy
 import csv
 import sys
 import os
+from twitter_authentication import *
 
 if len(sys.argv) >= 2:
     search_query = sys.argv[1]
@@ -9,12 +10,6 @@ if len(sys.argv) >= 2:
 else:
     search_query = ['fox']
     filename = 'fox_search_test.csv'
-
-# authentication keys
-consumer_key = ''
-consumer_secret = ''
-access_key = ''
-access_secret = ''
 
 # auth & api handlers
 auth = tweepy.AppAuthHandler(consumer_key, consumer_secret)
