@@ -49,8 +49,8 @@ Press CTRL-C to stop the script.
 
 More features and details coming soon...
 
-## To-do
+### Analyzing Python/Tweepy results with R
 
-```mine_tweets.R``` is currently configured for TAGS. I plan on making a new version for Tweepy-downloaded tweets soon.
+```mine_tweets_from_tweepy.R``` is an R script containing code to parse, analyze, and visualize basic summary statistics from the output from the Python/Tweepy scripts. ```mine_tweets_from_tweepy.Rmd``` is a RMarkdown notebook based on the same code, but with more detailed explanation.
 
 Happy mining!
