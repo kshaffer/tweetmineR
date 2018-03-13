@@ -2,14 +2,20 @@ import tweepy
 import csv
 import sys
 import os
+import datetime
+import time
 from twitter_authentication import *
 
-if len(sys.argv) >= 2:
-    search_query = sys.argv[1]
-    filename = sys.argv[2]
-else:
-    search_query = ['fox']
-    filename = 'fox_search_test.csv'
+# Enter each search term inside quotes, between 'OR'.
+# The whole search query should be inside a single string, which is the single item in a list.
+# (I know this is weird.)
+search_query = ['"Twitter" OR "@twitter" OR "#ilovehashtags"']
+filename = 'data/sources/tweets.csv'
+maxTweets = 10000 # Some arbitrary large number
+
+
+
+# You shouldn't have to change anything below this line.
 
 # auth & api handlers
 auth = tweepy.AppAuthHandler(consumer_key, consumer_secret)
@@ -21,9 +27,6 @@ if (not api):
     print ("Can't Authenticate")
     sys.exit(-1)
 
-api = tweepy.API(auth)
-
-maxTweets = 100000 # Some arbitrary large number
 tweetsPerQry = 100  # this is the max the API permits
 
 # If results from a specific ID onwards are reqd, set since_id to that ID.
@@ -37,7 +40,7 @@ max_id = -1
 # create output file and add header
 with open(filename, 'w') as csvfile:
     writer = csv.writer(csvfile, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
-    header = ['id_str','in_reply_to_status_id_str','in_reply_to_user_id_str','created_at','in_reply_to_screen_name','source','user_name','user_screen_name','user_created_at','user_statuses_count','user_description','user_location','user_verified','user_followers_count','user_friends_count','user_url','text','entities_hashtags','entities_urls','entities_user_mentions']
+    header = ['id_str','user_id_str','in_reply_to_status_id_str','in_reply_to_user_id_str','created_at','in_reply_to_screen_name','source','user_name','user_screen_name','user_created_at','user_statuses_count','user_description','user_location','user_verified','user_followers_count','user_friends_count','user_url','text','entities_hashtags','entities_urls','entities_user_mentions', 'retweeted_status_id']
     writer.writerow(header)
 
 # function for adding data to csv file
@@ -69,10 +72,28 @@ while tweetCount < maxTweets:
             print("No more tweets found")
             break
         for status in new_tweets:
-            write_csv([status.id_str, status.in_reply_to_status_id_str, status.in_reply_to_user_id_str, status.created_at, status.in_reply_to_screen_name, status.source, status.user._json['name'], status.user._json['screen_name'], status.user._json['created_at'], status.user._json['statuses_count'], status.user._json['description'], status.user._json['location'], status.user._json['verified'], status.user._json['followers_count'],  status.user._json['friends_count'], status.user._json['url'], status.text, status.entities['hashtags'], status.entities['urls'], status.entities['user_mentions']], filename)
+            if status.text[0:3] == 'RT ' and hasattr(status, 'retweeted_status'):
+                try:
+                    retweeted_status_text = status.retweeted_status.extended_tweet['full_text']
+                except:
+                    retweeted_status_text = status.text
+                    retweeted_status_id = status.retweeted_status.id_str
+                try:
+                    write_csv([status.id_str, status.user._json['id_str'], status.in_reply_to_status_id_str, status.in_reply_to_user_id_str, status.created_at, status.in_reply_to_screen_name, status.source, status.user._json['name'], status.user._json['screen_name'], status.user._json['created_at'], status.user._json['statuses_count'], status.user._json['description'], status.user._json['location'], status.user._json['verified'], status.user._json['followers_count'],  status.user._json['friends_count'], status.user._json['url'], retweeted_status_text, status.entities['hashtags'], status.entities['urls'], status.entities['user_mentions'], retweeted_status_id], filename)
+                except Exception as e:
+                    print(e)
+            else:
+	            try:
+	                write_csv([status.id_str, status.user._json['id_str'], status.in_reply_to_status_id_str, status.in_reply_to_user_id_str, status.created_at, status.in_reply_to_screen_name, status.source, status.user._json['name'], status.user._json['screen_name'], status.user._json['created_at'], status.user._json['statuses_count'], status.user._json['description'], status.user._json['location'], status.user._json['verified'], status.user._json['followers_count'],  status.user._json['friends_count'], status.user._json['url'], status.extended_tweet['full_text'], status.entities['hashtags'], status.entities['urls'], status.entities['user_mentions'], ''], filename)
+	            except:
+	                try:
+	                    write_csv([status.id_str, status.user._json['id_str'], status.in_reply_to_status_id_str, status.in_reply_to_user_id_str, status.created_at, status.in_reply_to_screen_name, status.source, status.user._json['name'], status.user._json['screen_name'], status.user._json['created_at'], status.user._json['statuses_count'], status.user._json['description'], status.user._json['location'], status.user._json['verified'], status.user._json['followers_count'],  status.user._json['friends_count'], status.user._json['url'], status.text, status.entities['hashtags'], status.entities['urls'], status.entities['user_mentions'], ''], filename)
+	                except Exception as e:
+	                    print(e)
         tweetCount += len(new_tweets)
         print("Downloaded {0} tweets".format(tweetCount))
         max_id = new_tweets[-1].id
+#        time.sleep(0.25)
     except tweepy.TweepError as e:
         # Just exit if any error
         print("some error : " + str(e))

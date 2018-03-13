@@ -2,273 +2,260 @@ library(tidyverse)
 library(tidytext)
 library(lubridate)
 library(stringr)
-library(httr)
-library(rvest)
-library(jsonlite)
-library(scales)
-
-# import tweets from a single TAGS archive
-google_sheet_csv <- '' #insert file path of local download or URL of published CSV file from TAGS archive Google sheet
-tweets <- read_csv(google_sheet_csv,
-                   col_types = 'ccccccccccccciiccc') %>%
-  mutate(date = mdy(paste(substring(created_at, 5, 10), substring(created_at, 27 ,30))))
-  
-source_text <- '#maga'
 
 
-# import tweets from multiple TAGS archives and assemble a single tweet database
-tweets <- read_csv('maga_tweetsMar345.csv', col_types = 'ccccccccccccciiccc') %>%
-            mutate(source = '#maga',
-                   pol = 'right') %>%
-  full_join(read_csv('resist_tweetsMar345.csv', col_types = 'ccccccccccccciiccc') %>%
-              mutate(source = '#resist',
-                     pol = 'left')) %>%
-  full_join(read_csv('americafirst_tweetsMar3ff.csv', col_types = 'ccccccccccccciiccc') %>%
-              mutate(source = '#americafirst',
-                     pol = 'right')) %>%
-  full_join(read_csv('pizzagate_tweetsMar3ff.csv', col_types = 'ccccccccccccciiccc') %>%
-              mutate(source = '#pizzagate',
-                     pol = 'right')) %>%
-  full_join(read_csv('trumprussia_tweetsMar345.csv', col_types = 'ccccccccccccciiccc') %>%
-              mutate(source = '#trumprussia',
-                     pol = 'left')) %>%
-  full_join(read_csv('blacklivesmatter_tweetsMar3ff.csv', col_types = 'ccccccccccccciiccc') %>%
-              mutate(source = '#blacklivesmatter',
-                     pol = 'left')) %>%
-  full_join(read_csv('impeachtrump_tweetsMar3ff.csv', col_types = 'ccccccccccccciiccc') %>%
-              mutate(source = '#impeachtrump',
-                     pol = 'left')) %>%
-  full_join(read_csv('whitegenocide_tweetsMar3ff.csv', col_types = 'ccccccccccccciiccc') %>%
-              mutate(source = '#whitegenocide',
-                     pol = 'right'))
+source_folder <- 'data/'
+files <- list.files(str_c(source_folder, 'sources/'))
 
+tweets_raw <- tibble()
 
-# functions to extract URLs from JSON entities_str cell
-get_url <- function(cell) {
-  if (!is.na(cell)) {
-    try(urls <- fromJSON(cell)$urls)
-    if (exists('urls') & length(urls) > 0) {
-      return(unlist(urls$url))
-    } else {
-      return(NA)
-    }
-  } else {
-    return(NA)
-  }
+for(file in files) {
+  print(file)
+  tweets_raw <- bind_rows(tweets_raw,
+                      read_csv(str_c(source_folder, 'sources/', file), col_types = 'ccccTccccciccliicccccc') %>%
+                        select(id_str,
+                               user_id_str,
+                               created_at,
+                               user_screen_name,
+                               user_created_at,
+                               user_statuses_count,
+                               text,
+                               entities_urls,
+                               retweeted_status_id))
 }
 
-get_expanded_url <- function(cell) {
-  if (!is.na(cell)) {
-    try(urls <- fromJSON(cell)$urls)
-    if (exists('urls') & length(urls) > 0) {
-      return(unlist(urls$expanded_url))
-    } else {
-      return(NA)
-    }
-  } else {
-    return(NA)
-  }
+tweets <- tweets_raw %>%
+  group_by(id_str,
+           user_id_str,
+           created_at,
+           user_screen_name,
+           user_created_at,
+           text,
+           entities_urls,
+           retweeted_status_id) %>%
+  summarize(user_statuses_count = max(user_statuses_count)) %>%
+  ungroup()
+
+write_csv(tweets, str_c(source_folder, 'tweets.csv'))
+
+# high-/low-volume account threshold (this archive)
+threshold <- ifelse((length(tweets$id_str) / 10000) > 1,
+                    length(tweets$id_str) / 10000,
+                    2)
+# threshold <- 12
+write_csv(as_tibble(threshold), str_c(source_folder, 'threshold.csv'))
+threshold_all_time <- 100000 # high-/low-volume account threshold (all-time)
+
+# frequency of tweets over time
+tweets %>%
+  mutate(time_floor = floor_date(created_at, unit = "1 hour")) %>%
+  group_by(time_floor) %>%
+  summarize(tweet_count = n()) %>%
+  write_csv(str_c(source_folder, 'tweets_per_hour.csv'))
+
+
+# most retweeted
+tweets %>%
+  filter(str_detect(text, '^RT')) %>%
+  count(text, sort = TRUE) %>%
+  slice(1) %>%
+  write_csv(str_c(source_folder, 'most_retweeted_tweet.csv'))
+
+tweets %>%
+  filter(created_at > max(created_at) - days(1)) %>%
+  filter(str_detect(text, '^RT')) %>%
+  count(text, sort = TRUE) %>%
+  slice(1) %>%
+  write_csv(str_c(source_folder, 'most_retweeted_tweet_24h.csv'))
+
+tweets %>%
+  filter(str_detect(text, '^RT')) %>%
+  count(text, sort = TRUE) %>%
+  filter(n > 1) %>%
+  write_csv(str_c(source_folder, 'most_retweeted_tweet_all.csv'))
+
+tweets %>%
+  filter(created_at > max(created_at) - days(1)) %>%
+  filter(str_detect(text, '^RT')) %>%
+  count(text, sort = TRUE) %>%
+  filter(n > 1) %>%
+  write_csv(str_c(source_folder, 'most_retweeted_tweet_all_24h.csv'))
+
+extract_retweeted_user <- function(text) {
+  return(str_split(str_replace(text, '^RT ', ''), ':')[[1]][1])
 }
 
-# function to extract domains from URLs
-extract_domain <- function(url) {
-  return(gsub('www.', '', unlist(strsplit(unlist(strsplit(as.character(url), '//'))[2], '/'))[1]))
-}
+tweets %>%
+  select(text) %>%
+  filter(str_detect(text, '^RT')) %>%
+  mutate(retweeted_user = sapply(text, extract_retweeted_user)) %>%
+  select(retweeted_user) %>%
+  count(retweeted_user, sort = TRUE) %>%
+  write_csv(str_c(source_folder, 'most_retweeted_users.csv'))
 
-# extract urls from tweets
-tweets_with_urls <- tweets %>%
-  mutate(linked_url_expanded = sapply(entities_str, get_expanded_url),
-         linked_url_tco = sapply(entities_str, get_url))
-
-# whole corpus url list
-urls <- unlist(tweets_with_urls$linked_url_expanded)
-
-# whole corpus, tagged by source and pol
-urls <- tweets_with_urls %>%
-  filter(source == '#maga') %>%
-  select(linked_url_expanded) %>%
-  unlist() %>%
-  as_tibble() %>%
-  mutate(source = '#maga',
-         pol = 'right') %>%
-  full_join(tweets_with_urls %>%
-              filter(source == '#americafirst') %>%
-              select(linked_url_expanded) %>%
-              unlist() %>%
-              as_tibble() %>%
-              mutate(source = '#americafirst',
-                     pol = 'right')) %>%
-  full_join(tweets_with_urls %>%
-              filter(source == '#pizzagate') %>%
-              select(linked_url_expanded) %>%
-              unlist() %>%
-              as_tibble() %>%
-              mutate(source = '#pizzagate',
-                     pol = 'right')) %>%
-  full_join(tweets_with_urls %>%
-              filter(source == '#whitegenocide') %>%
-              select(linked_url_expanded) %>%
-              unlist() %>%
-              as_tibble() %>%
-              mutate(source = '#whitegenocide',
-                     pol = 'right')) %>%
-  full_join(tweets_with_urls %>%
-              filter(source == '#resist') %>%
-              select(linked_url_expanded) %>%
-              unlist() %>%
-              as_tibble() %>%
-              mutate(source = '#resist',
-                     pol = 'left')) %>%
-  full_join(tweets_with_urls %>%
-              filter(source == '#trumprussia') %>%
-              select(linked_url_expanded) %>%
-              unlist() %>%
-              as_tibble() %>%
-              mutate(source = '#trumprussia',
-                     pol = 'left')) %>%
-  full_join(tweets_with_urls %>%
-              filter(source == '#impeachtrump') %>%
-              select(linked_url_expanded) %>%
-              unlist() %>%
-              as_tibble() %>%
-              mutate(source = '#impeachtrump',
-                     pol = 'left')) %>%
-  full_join(tweets_with_urls %>%
-              filter(source == '#blacklivesmatter') %>%
-              select(linked_url_expanded) %>%
-              unlist() %>%
-              as_tibble() %>%
-              mutate(source = '#blacklivesmatter',
-                     pol = 'left')) %>%
-  mutate(url = value) %>%
-  select(url, source, pol)
-
-# count URLs frequency of occurrence
-url_list <- urls %>%
-  filter(pol == 'right') %>%
-  group_by(url) %>%
-  summarize(count = n()) %>%
-  select(url, count) %>%
-  filter(!grepl('https://t.co/', url),
-         !grepl('https://twitter.com/', url),
-         url != 'NA') %>%
-  arrange(desc(count))
+tweets %>%
+  filter(created_at > max(created_at) - days(1)) %>%
+  select(text) %>%
+  filter(str_detect(text, '^RT')) %>%
+  mutate(retweeted_user = sapply(text, extract_retweeted_user)) %>%
+  select(retweeted_user) %>%
+  count(retweeted_user, sort = TRUE) %>%
+  write_csv(str_c(source_folder, 'most_retweeted_users_24h.csv'))
 
 
-# count the frequency of a domain's occurrence
-domain_list <- url_list %>%
-  mutate(domain = mapply(extract_domain, url)) %>%
-  group_by(domain) %>%
-  summarize(domain_count = sum(count)) %>%
-  arrange(desc(domain_count))
+# account summaries
+accounts_meta <- tweets %>%
+  select(user_screen_name, user_created_at, user_statuses_count) %>%
+  mutate(account_created = floor_date(as_date(str_c(mdy(str_c(substring(user_created_at, 5, 11), substring(user_created_at, 27, 30))), substring(user_created_at, 11, 19))), unit = "1 day")) %>%
+  select(-user_created_at) %>%
+  group_by(user_screen_name, account_created) %>%
+  summarize(statuses = max(user_statuses_count)) %>%
+  ungroup()
 
-# plot the most common domains in the corpus
-domain_list %>%
-  mutate(domain = reorder(domain, domain_count)) %>%
-  ggplot(aes(domain, domain_count, fill = domain)) +
-  geom_bar(stat = 'identity') +
-  xlab(NULL) +
-  ylab(paste('domain count (since ', 
-             min_date,
-             ')', sep = '')) +
-  ggtitle(paste('Most common domains in tweets containing', source_text)) +
-  theme(legend.position="none") +
-  coord_flip()
-
-# write domain info to files
-write_csv(domain_list, 'right_domains.csv')
-write_csv(url_list, 'right_urls.csv')
-
-write_csv(urls, 'all_urls.csv')
-
-# 2D visualization of common websites
-url_share_by_pol <- urls %>%
-  mutate(domain = mapply(extract_domain, url)) %>%
-  group_by(domain, pol) %>%
-  summarize(count = n()) %>%
-  spread(pol, count, fill = 0) %>%
-  mutate(left_total = nrow(urls %>% filter(pol == 'left')),
-         right_total = nrow(urls %>% filter(pol == 'right')),
-         left_share = left/left_total,
-         right_share = right/right_total)
-
-write_csv(url_share_by_pol, 'url_share_by_pol.csv')
-
-url_share_by_pol %>% 
-  ggplot(aes(x = right_share,
-             y = left_share,
-             color = abs(right_share - left_share))) +
-  geom_jitter() +
-  geom_text(aes(label = domain), check_overlap = TRUE, vjust = 1.5) +
-  geom_abline(color = "gray40", lty = 2) +
-  geom_jitter(alpha = 0.1, size = 2.5, width = 0.25, height = 0.25) +
-  scale_x_log10() +
-  scale_y_log10() +
-  scale_color_gradient(limits = c(0, 0.001), low = "darkslategray4", high = "gray75") +
-  xlab('Share of right-wing hashtag tweets (log10)') +
-  ylab('Share of left-wing hashtag tweets (log10)') +
-  ggtitle('Relative prominence of domains in right- and left-wing hashtags\nright-wing: #maga, #americafirst, #pizzagate, #whitegenocide\nleft-wing: #resist, #impeachtrump, #trumprussia, #blacklivesmatter') +
-  theme(legend.position='none')
+accounts_meta %>%
+  write_csv(str_c(source_folder, 'accounts.csv'))
 
 
-# compare most left-/right-slanted of domains
-site_ratios <- url_share_by_pol %>%
-  filter(!is.na(domain)) %>%
-  mutate_each(funs((. + 1) / sum(. + 1)), -domain) %>%
-  mutate(right_over_left = log(right_share/left_share)) %>%
-  arrange(desc(right_over_left))
 
-site_ratios %>% 
-  arrange(desc(abs(right_over_left)))
+# find most prolific accounts (with RTs)
 
-site_ratios %>%
-  group_by(right_over_left < 0) %>%
-  top_n(15, abs(right_over_left)) %>%
-  ungroup() %>%
-  mutate(domain = reorder(domain, right_over_left)) %>%
-  ggplot(aes(domain, right_over_left, fill = right_over_left < 0)) +
-  geom_bar(stat = "identity") +
-  coord_flip() +
-  ylab("Log odds ratio (Right-wing/Left-wing)") +
-  ggtitle('Domains most characteristic of left- or right-wing hashtags on Twitter in early March\nright-wing: #maga, #americafirst, #pizzagate, #whitegenocide\nleft-wing: #resist, #impeachtrump, #trumprussia, #blacklivesmatter\n') +
-  scale_fill_discrete(name = "", labels = c("Right-wing", "Left-wing"))
+tweets %>%
+  count(user_screen_name, sort=TRUE) %>%
+  write_csv(str_c(source_folder, 'user_count.csv'))
+
+tweets %>%
+  filter(created_at > max(created_at) - days(1)) %>%
+  count(user_screen_name, sort=TRUE) %>%
+  write_csv(str_c(source_folder, 'user_count_24h.csv'))
 
 
-# extract words from tweets, make tidy
+
+# extract words from tweets (with RTs), make tidy
+
 reg_words <- "([^A-Za-z_\\d#@']|'(?![A-Za-z_\\d#@]))"
-tidy_tweets <- tweets %>% 
-  filter(!str_detect(text, "^RT")) %>%
+tidy_tweets <- tweets %>%
+  # select(id_str, user_screen_name, created_at, text) %>%
+  select(created_at, text) %>%
   mutate(text = str_replace_all(text, "https://t.co/[A-Za-z\\d]+|http://[A-Za-z\\d]+|&amp;|&lt;|&gt;|RT|https", "")) %>%
   unnest_tokens(word, text, token = "regex", pattern = reg_words) %>%
   filter(!word %in% stop_words$word,
          str_detect(word, "[a-z]"))
 
-# plot the most common words in the corpus
-min_date <- tidy_tweets %>%
-  mutate(date = mdy(paste(substring(created_at, 5, 10), substring(created_at, 27 ,30)))) %>%
-  select(date) %>%
-  .$date %>%
-  min()
-  
+write_csv(tidy_tweets, str_c(source_folder, 'tidy_tweets.csv'))
+
+
+# Most mentioned accounts (with RTs)
+
 tidy_tweets %>%
   count(word, sort=TRUE) %>%
-  filter(substr(word, 1, 1) != '#', # omit hashtags
-         substr(word, 1, 1) != '@', # omit Twitter handles
-         n > 300) %>% # only most common words
+  filter(substr(word, 1, 1) == '@') %>% # include only Twitter handles
   mutate(word = reorder(word, n)) %>%
-  ggplot(aes(word, n, fill = word)) +
-  geom_bar(stat = 'identity') +
-  xlab(NULL) +
-  ylab(paste('Word count (since ', 
-             min_date,
-             ')', sep = '')) +
-  ggtitle(paste('Most common words in tweets containing', source_text)) +
-  theme(legend.position="none") +
-  coord_flip()
+  write_csv(str_c(source_folder, 'mention_count.csv'))
 
-# bigrams
-tidy_bigrams <- tweets %>% 
-  filter(!str_detect(text, "^RT")) %>%
+tidy_tweets %>%
+  filter(created_at > max(created_at) - days(1)) %>%
+  count(word, sort=TRUE) %>%
+  filter(substr(word, 1, 1) == '@') %>% # include only Twitter handles
+  mutate(word = reorder(word, n)) %>%
+  write_csv(str_c(source_folder, 'mention_count_24h.csv'))
+
+
+
+# Most used hashtags (with RTs)
+
+tidy_tweets %>%
+  count(word, sort=TRUE) %>%
+  filter(substr(word, 1, 1) == '#') %>% # include only Twitter handles
+  mutate(word = reorder(word, n)) %>%
+  write_csv(str_c(source_folder, 'hashtag_count.csv'))
+
+tidy_tweets %>%
+  filter(created_at > max(created_at) - days(1)) %>%
+  count(word, sort=TRUE) %>%
+  filter(substr(word, 1, 1) == '#') %>% # include only Twitter handles
+  mutate(word = reorder(word, n)) %>%
+  write_csv(str_c(source_folder, 'hashtag_count_24h.csv'))
+
+rm(tidy_tweets)
+gc()
+
+
+# functions to extract URLs from JSON entities_str cell
+
+get_expanded_url <- function(cell) {
+  if (!is.na(cell) & str_detect(cell, 'url')) {
+    url <- cell %>%
+      str_replace_all("\\[\\{'url': 'htt(\\S)* 'expanded_url': '", "") %>%
+      str_replace_all("', 'display_url': '(\\S)*', .*$", "")
+    #print(url)
+    return(url)
+  } else {
+    return(NA)
+  }
+}
+
+extract_domain <- function(url) {
+  return(gsub('www.', '', unlist(strsplit(unlist(strsplit(as.character(url), '//'))[2], '/'))[1]))
+}
+
+# extract urls from tweets & count frequency of occurrence
+url_list <- tweets %>%
+  select(entities_urls) %>%
+  mutate(url = sapply(entities_urls, get_expanded_url)) %>%
+  filter(!is.na(url)) %>%
+  # unnest() %>%
+  count(url, sort = TRUE) %>%
+  select(url, count = n) %>%
+  filter(!grepl('https://t.co/', url),
+         !grepl('https://twitter.com/', url))
+
+url_list %>%
+  write_csv(str_c(source_folder, 'url_list.csv'))
+
+
+# count the frequency of a domain's occurrence
+url_list %>%
+  mutate(domain = mapply(extract_domain, url)) %>%
+  group_by(domain) %>%
+  summarize(domain_count = sum(count)) %>%
+  arrange(desc(domain_count)) %>%
+  write_csv(str_c(source_folder, 'domain_list.csv'))
+
+rm(url_list)
+gc()
+
+
+# ditto, last 24h
+url_list_24h <- tweets %>%
+  select(entities_urls, created_at) %>%
+  filter(created_at > max(created_at) - days(1)) %>%
+  mutate(url = sapply(entities_urls, get_expanded_url)) %>%
+  filter(!is.na(url)) %>%
+  # unnest() %>%
+  count(url, sort = TRUE) %>%
+  select(url, count = n) %>%
+  filter(!grepl('https://t.co/', url),
+         !grepl('https://twitter.com/', url))
+
+url_list_24h %>%
+  write_csv(str_c(source_folder, 'url_list_24h.csv'))
+
+url_list_24h %>%
+  mutate(domain = mapply(extract_domain, url)) %>%
+  group_by(domain) %>%
+  summarize(domain_count = sum(count)) %>%
+  arrange(desc(domain_count)) %>%
+  write_csv(str_c(source_folder, 'domain_list_24h.csv'))
+
+rm(url_list_24h)
+gc()
+
+
+# bigrams & trigrams
+
+tidy_bigrams <- tweets %>%
+  filter(!str_detect(text, '^RT')) %>%
+  select(id_str, user_screen_name, created_at, text) %>%
   mutate(text = str_replace_all(text, "https://t.co/[A-Za-z\\d]+|http://[A-Za-z\\d]+|&amp;|&lt;|&gt;|RT|https", "")) %>%
   unnest_tokens(word, text, token = "regex", pattern = reg_words) %>%
   mutate(next_word = lead(word)) %>%
@@ -283,72 +270,166 @@ tidy_bigrams <- tweets %>%
   filter(id_str == lead(id_str)) %>% # needed to ensure bigrams to cross from one tweet into the next
   unite(bigram, word, next_word, sep = ' ')
 
+write_csv(tidy_bigrams, str_c(source_folder, 'tidy_bigrams.csv'))
+
 tidy_bigrams %>%
-  count(bigram, sort=TRUE) %>%
-  filter(n >= 100) %>%
-  mutate(bigram = reorder(bigram, n)) %>%
-  ggplot(aes(bigram, n, fill = bigram)) +
-  geom_bar(stat = 'identity') +
-  xlab(NULL) +
-  ylab(paste('bigram count (since ', 
-             min_date,
-             ')', sep = '')) +
-  ggtitle(paste('Most common bigrams in tweets containing', source_text)) +
-  theme(legend.position="none") +
-  coord_flip()
+  count(bigram, sort = TRUE) %>%
+  write_csv(str_c(source_folder, 'bigrams.csv'))
+
+tidy_bigrams %>%
+  filter(created_at > max(created_at) - days(1)) %>%
+  count(bigram, sort = TRUE) %>%
+  write_csv(str_c(source_folder, 'bigrams_24h.csv'))
+
+rm(tidy_bigrams)
+gc()
+
+
+tidy_trigrams <- tweets %>%
+  filter(!str_detect(text, '^RT')) %>%
+  select(id_str, user_screen_name, created_at, text) %>%
+  mutate(text = str_replace_all(text, "https://t.co/[A-Za-z\\d]+|http://[A-Za-z\\d]+|&amp;|&lt;|&gt;|RT|https", "")) %>%
+  unnest_tokens(word, text, token = "regex", pattern = reg_words) %>%
+  mutate(next_word = lead(word),
+         next_next_word = lead(next_word)) %>%
+  filter(!word %in% stop_words$word, # remove stop words
+         !next_word %in% stop_words$word, # remove stop words
+         !next_next_word %in% stop_words$word, # remove stop words
+         substr(word, 1, 1) != '@', # remove user handles to protect privacy
+         substr(next_word, 1, 1) != '@', # remove user handles to protect privacy
+         substr(next_next_word, 1, 1) != '@', # remove user handles to protect privacy
+         substr(word, 1, 1) != '#', # remove hashtags
+         substr(next_word, 1, 1) != '#',
+         substr(next_next_word, 1, 1) != '#',
+         str_detect(word, "[a-z]"), # remove words containing ony numbers or symbols
+         str_detect(next_word, "[a-z]"), # remove words containing ony numbers or symbols
+         str_detect(next_next_word, "[a-z]")) %>% # remove words containing ony numbers or symbols
+  filter(id_str == lead(id_str) & id_str == lead(id_str, n=2)) %>% # needed to ensure bigrams to cross from one tweet into the next
+  unite(trigram, word, next_word, next_next_word, sep = ' ')
+
+write_csv(tidy_trigrams, str_c(source_folder, 'tidy_trigrams.csv'))
+
+tidy_trigrams %>%
+  count(trigram, sort = TRUE) %>%
+  write_csv(str_c(source_folder, 'trigrams.csv'))
+
+tidy_trigrams %>%
+  filter(created_at > max(created_at) - days(1)) %>%
+  count(trigram, sort = TRUE) %>%
+  write_csv(str_c(source_folder, 'trigrams_24h.csv'))
+
+rm(tidy_trigrams)
+gc()
+
+
+# compare low & high volume tweets (this archive)
+compare_tweets <-
+  bind_rows(tweets %>%
+              inner_join(tweets %>%
+                           count(user_screen_name, sort=TRUE) %>%
+                           filter(n >= threshold) %>%
+                           select(user_screen_name) %>%
+                           mutate(volume = 'high')),
+            tweets %>%
+              inner_join(tweets %>%
+                           count(user_screen_name, sort=TRUE) %>%
+                           filter(n < threshold) %>%
+                           select(user_screen_name) %>%
+                           mutate(volume = 'low'))
+  )
+
+
+compare_tweets %>%
+  mutate(url = sapply(entities_urls, get_expanded_url)) %>%
+  filter(!is.na(url)) %>%
+  # unnest() %>%
+  count(url, volume) %>%
+  select(url, volume, count = n) %>%
+  filter(!grepl('https://t.co/', url),
+         !grepl('https://twitter.com/', url)) %>%
+  mutate(domain = mapply(extract_domain, url)) %>%
+  group_by(domain, volume) %>%
+  summarize(domain_count = sum(count)) %>%
+  arrange(desc(domain_count)) %>%
+  spread(volume, domain_count, fill = 0) %>%
+  ungroup() %>%
+  mutate_each(funs((. + 1) / sum(. + 1)), -domain) %>%
+  mutate(logratio = log(high / low)) %>%
+  arrange(desc(logratio)) %>%
+  select(domain, high, low, logratio) %>%
+  write_csv(str_c(source_folder, 'domain_ratios.csv'))
+
+rm(compare_tweets)
+gc()
+
+
+# compare low & high volume tweets (all time)
+compare_tweets_all_time <-
+  bind_rows(tweets %>%
+              inner_join(accounts_meta %>%
+                           filter(statuses >= threshold_all_time) %>%
+                           select(user_screen_name) %>%
+                           mutate(volume = 'high')),
+            tweets %>%
+              inner_join(accounts_meta %>%
+                           filter(statuses < threshold_all_time) %>%
+                           select(user_screen_name) %>%
+                           mutate(volume = 'low'))
+  )
+
+
+compare_tweets_all_time %>%
+  mutate(url = sapply(entities_urls, get_expanded_url)) %>%
+  filter(!is.na(url)) %>%
+  # unnest() %>%
+  count(url, volume) %>%
+  select(url, volume, count = n) %>%
+  filter(!grepl('https://t.co/', url),
+         !grepl('https://twitter.com/', url)) %>%
+  mutate(domain = mapply(extract_domain, url)) %>%
+  group_by(domain, volume) %>%
+  summarize(domain_count = sum(count)) %>%
+  arrange(desc(domain_count)) %>%
+  spread(volume, domain_count, fill = 0) %>%
+  ungroup() %>%
+  mutate_each(funs((. + 1) / sum(. + 1)), -domain) %>%
+  mutate(logratio = log(high / low)) %>%
+  arrange(desc(logratio)) %>%
+  select(domain, high, low, logratio) %>%
+  write_csv(str_c(source_folder, 'domain_ratios_all_time.csv'))
+
+rm(compare_tweets_all_time)
+gc()
 
 
 
+# compare recent and established accounts
+compare_recent_established <- tweets %>%
+  inner_join(accounts_meta %>%
+               filter(account_created >= max(account_created) - days(31)) %>%
+               select(user_screen_name) %>%
+               mutate(recency = 'recent') %>%
+               bind_rows(accounts_meta %>%
+                           filter(account_created < max(account_created) - days(31)) %>%
+                           select(user_screen_name) %>%
+                           mutate(recency = 'established')))
 
 
-
-# extract URLs from tweet texts and count frequency 
-# (alternative mode that takes a long time, but follows URL shorteners to target URLs)
-
-minimum_occurrences <- 2 # minimum number of occurrences to include in output
-
-reg <- "([^A-Za-z_\\d#/@']|'(?![A-Za-z_\\d#/@]))"
-urls_temp <- tweets %>% 
-  unnest_tokens(word, text, token = "regex", pattern = reg, to_lower = FALSE) %>%
-  mutate(word = str_replace_all(word, "https|//t|http|&amp;|&lt;|&gt;", ""),
-         word = str_replace_all(word, "co/", "https://t.co/")) %>%
-  select(word) %>%
-  filter(grepl('https://t.co/', word, fixed = TRUE)) %>%
-  count(word, sort=TRUE) %>%
-  mutate(word = reorder(word, n)) 
-
-# find target and status code of redirected URL
-# limited to URLs occurring a minimum number of times (set above)
-# excludes tweets as sources
-#
-# this queries each URL in the table and will take some time,
-# especially for longer archives
-# 
-# TO DO: save already queried URLs locally, then query new ones
-# and merge the results
-
-get_redirected_url <- function(url) {
-  print(url)
-  try(url_to_return <- GET(url)) 
-  if (exists('url_to_return')) {
-    return(url_to_return)
-  } else {
-    return(list(NA,NA,NA,NA,NA,NA,NA,NA,NA,NA))
-  }
-}
-
-urls_common <- urls_temp %>%
-  filter(n >= minimum_occurrences) %>% 
-  mutate(source_url = as.character(word)) %>%
-  select(source_url, count = n) 
-
-url <- t(sapply(urls_common$source_url, get_redirected_url)) %>%
-  as_tibble() %>%
-  select(url, status_code)
-
-url_list <- cbind(urls_common, url) %>%
-  as_tibble() %>%
-  select(url, count, status_code) %>%
-  filter(status_code != 404,
-         url != 'https://t.co/',
-         !grepl('https://twitter.com/', url))
+compare_recent_established %>%
+  mutate(url = sapply(entities_urls, get_expanded_url)) %>%
+  filter(!is.na(url)) %>%
+  # unnest() %>%
+  count(url, recency) %>%
+  filter(!grepl('https://t.co/', url),
+         !grepl('https://twitter.com/', url)) %>%
+  mutate(domain = mapply(extract_domain, url)) %>%
+  group_by(domain, recency) %>%
+  summarize(domain_count = sum(n)) %>%
+  arrange(desc(domain_count)) %>%
+  spread(recency, domain_count, fill = 0) %>%
+  ungroup() %>%
+  mutate_each(funs((. + 1) / sum(. + 1)), -domain) %>%
+  mutate(logratio = log(recent / established)) %>%
+  arrange(desc(logratio)) %>%
+  select(domain, recent, established, logratio) %>%
+  write_csv(str_c(source_folder, 'compare_recent_established.csv'))
