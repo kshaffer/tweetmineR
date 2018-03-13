@@ -16,8 +16,10 @@ See my blog post, ["Mining Twitter data with R, TidyText, and TAGS"](http://push
 
 ```twitter_stream.py``` is a Python script that uses Tweepy to fetch a live stream of tweets based on a search string. Register for a Twitter developer account and add your authentication details to ```twitter_authentication.py```. To start, either edit the following lines with your search query and output file name
 
-```search_query = ['Twitter','@twitter', '#ilovehashtags']
-filename = 'data/sources/stream-' + str(datetime.datetime.now()).replace(' ', '_').split('.')[0] + '.csv'```
+```
+search_query = ['Twitter','@twitter', '#ilovehashtags']
+filename = 'data/sources/stream-' + str(datetime.datetime.now()).replace(' ', '_').split('.')[0] + '.csv'
+```
 
 Then run the script locally, or on a virtual private server for extended collection periods (using `nohup` to allow the process to continue after you close the connection).
 
